@@ -1,0 +1,175 @@
+---
+title: "Online Shopping Transaction Analysis"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+Incuded libraries
+```{r}
+library(readxl)
+library(tidyverse)
+library(ggplot2)
+library(dplyr)
+library(DataExplorer)
+library(arules)
+library(arulesViz)
+library(RColorBrewer)
+
+```
+
+Read file from current working directory
+```{r}
+online_data = read_excel("Online Retail.xlsx")
+
+```
+
+View data to have an idea of what it looks like
+```{r}
+head(online_data)
+tail(online_data)
+str(online_data)
+summary(online_data)
+
+```
+
+Visualise dataset structure
+```{r}
+plot_str(online_data, fontSize = 40)
+plot_intro(online_data)
+plot_missing(online_data)
+
+```
+
+Change data types for the different variables and removes spaces before and after observations
+```{r}
+
+online_data$InvoiceNo = trimws(as.character(online_data$InvoiceNo))
+online_data$Description = trimws(online_data$Description)
+
+
+online_data = online_data%>%mutate_if(is.character, as.factor)
+online_data$CustomerID = as.factor(online_data$CustomerID)
+head(online_data)
+str(online_data)
+
+apply(online_data, 2, function(x) length(unique(x)))
+
+```
+
+Removing cancelled orders, adjusted bad debt, remove zero or negative quantities, negative unit prices and NAs
+```{r}
+
+plot(online_data$UnitPrice,ylab = "Prices", main = "Prices")
+online_data[(online_data$UnitPrice <= 0),]
+
+plot(online_data$Quantity, ylab = "Quantity", main = "Quantities Purchased")
+online_data[(online_data$Quantity <= 0),]
+
+
+unique(substr(online_data$InvoiceNo, 1,1))
+
+online_data1 = filter(online_data, !(substr(online_data$InvoiceNo, 1,1) %in% c("A","C")),
+                        online_data$Quantity > 0,
+                        online_data$Description != "?",
+                        !(online_data$Description %in% c("amazon", "AMAZON")),
+                        !is.na(online_data$Description))
+
+summary(online_data1$UnitPrice)
+summary(online_data1$Quantity)
+
+apply(online_data, 2, function(x) sum(is.na(x)))
+apply(online_data1, 2, function(x) sum(is.na(x)))
+
+dim(online_data1)
+```
+
+Aggregating Invoices and items
+```{r}
+online_data1_agg = split(online_data1$Description, online_data1$InvoiceNo)
+head(online_data1_agg)
+
+```
+
+Average number of items purchased
+```{r}
+avg_quantity = online_data1 %>% group_by(InvoiceNo) %>% summarize(avg_basket = mean(Quantity))
+head(avg_quantity)
+ggplot(data = avg_quantity, aes(x = avg_quantity$avg_basket)) + geom_histogram(fill = "blue", bins = 50000) + geom_rug() + 
+  coord_cartesian(xlim = c(0,80)) + labs(x = "Average Basket", y = "Frequency", title = "Average items purchased")
+
+```
+
+Remove duplicate items in the same invoice
+```{r}
+online_data1_agg1 = list()
+for (i in 1:length(online_data1_agg)){
+  online_data1_agg1[[i]] = unique(online_data1_agg[[i]])
+}
+head(online_data1_agg1)
+
+```
+
+Using arules to analyse transactions
+```{r}
+trxns = as(online_data1_agg1, "transactions")
+summary(trxns)
+inspect(trxns[1:10,])
+
+```
+
+Frequency of purchased items
+```{r}
+itemFrequencyPlot(trxns, support=0.05)
+itemFrequencyPlot(trxns, topN=10)
+
+```
+
+Setting up rules
+```{r}
+online_basket = apriori(data = trxns, parameter = list(support = 0.005, conf = 0.75))
+inspect(sort(online_basket[1:100], by = "lift"))
+
+```
+
+Plot Rules
+```{r}
+plot(online_basket, control = list(col = brewer.pal(11, "Spectral")))
+
+```
+
+Plot of the top 10 rules by support
+```{r}
+sub_rules = head(sort(online_basket, by="support"),10)
+inspect(sub_rules)
+plot(sub_rules, method="graph", cex = 0.5)
+
+```
+
+Summary
+```{r}
+summary(online_basket)
+```
+
+Rules based on items containing the word COFFEE
+```{r}
+rulesCoffee = subset(online_basket, subset= items %pin% "COFFEE")
+summary(rulesCoffee)
+
+sub_rules_coffee = head(sort(rulesCoffee, by="support"),10)
+inspect(sub_rules_coffee)
+plot(sub_rules_coffee, method="graph", cex = 0.5)
+```
+
+Rules based on the right hand side items having the colours Red, Black or White
+```{r}
+rulesColours = subset(online_basket, subset= rhs %pin% c("RED", "BLACK", "BLUE"))
+summary(rulesColours)
+
+sub_rules_colours= head(sort(rulesColours, by="support"),10)
+inspect(sub_rules_colours)
+plot(sub_rules_colours, method="graph", cex = 0.5)
+```
+
